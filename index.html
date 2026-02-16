@@ -272,6 +272,8 @@
     // --- Whale state ---
     let whale = null;
     let lastWhaleLevel = 0;
+    let gameSpeed = 1;        // 1 = normal, slows to 0.15 when whale is out
+    let targetGameSpeed = 1;
 
     // --- Item types ---
     const ITEM_TYPES = [
@@ -423,6 +425,7 @@
     //  WHALE SYSTEM - digital whale drawn on canvas
     // ============================================
     function spawnWhale() {
+      if (whale && whale.active) return; // don't spawn if one is already flying
       const goingRight = Math.random() > 0.5;
       whale = {
         x: goingRight ? -300 : W + 300,
@@ -442,6 +445,9 @@
         active: true,
       };
 
+      // Slow everything down
+      targetGameSpeed = 0.15;
+
       // Show whale text
       const whaleTextEl = document.getElementById('whale-text');
       whaleTextEl.innerHTML = '🐋 A Magical Whale Appears! 🐋';
@@ -452,8 +458,8 @@
     function updateWhale() {
       if (!whale || !whale.active) return;
 
-      whale.x += whale.speed * whale.dir * 1.5;
-      whale.progress += 0.002;
+      whale.x += whale.speed * whale.dir * 0.8;
+      whale.progress += 0.0012;
       whale.tailAngle = Math.sin(time * 0.05) * 0.3;
       whale.sparkleTimer++;
 
@@ -462,8 +468,8 @@
       const arc = -Math.pow((arcProgress - 0.5) * 2, 2) + 1; // parabola peaking at 0.5
       whale.y = whale.startY - arc * H * 0.35;
 
-      // Spawn water droplets at peak
-      if (whale.sparkleTimer % 3 === 0) {
+      // Spawn water droplets (less frequent)
+      if (whale.sparkleTimer % 8 === 0) {
         whaleDroplets.push({
           x: whale.x - whale.dir * 20 + (Math.random() - 0.5) * 60,
           y: whale.y + (Math.random() - 0.5) * 30,
@@ -474,15 +480,15 @@
         });
       }
 
-      // Sparkle trail
-      if (whale.sparkleTimer % 5 === 0) {
+      // Sparkle trail (less frequent)
+      if (whale.sparkleTimer % 12 === 0) {
         particles.push({
           x: whale.x - whale.dir * whale.bodyLength * 0.4 + (Math.random() - 0.5) * 40,
           y: whale.y + (Math.random() - 0.5) * 40,
           vx: (Math.random() - 0.5),
           vy: -Math.random() * 0.5,
           life: 1,
-          decay: 0.01,
+          decay: 0.015,
           size: Math.random() * 3 + 1,
           color: '#88ddff',
           type: 'sparkle',
@@ -493,6 +499,7 @@
       if ((whale.dir === 1 && whale.x > W + 400) || (whale.dir === -1 && whale.x < -400)) {
         whale.active = false;
         whale = null;
+        targetGameSpeed = 1; // restore normal speed
       }
     }
 
@@ -506,52 +513,38 @@
       const bL = whale.bodyLength;
       const bH = whale.bodyHeight;
 
-      // Glow aura
-      const glow = ctx.createRadialGradient(0, 0, bH * 0.5, 0, 0, bL * 0.8);
-      glow.addColorStop(0, 'rgba(100, 180, 255, 0.15)');
-      glow.addColorStop(1, 'rgba(100, 180, 255, 0)');
-      ctx.fillStyle = glow;
+      // Soft glow behind whale (simple circle, no radial gradient)
+      ctx.fillStyle = 'rgba(100, 180, 255, 0.07)';
       ctx.beginPath();
-      ctx.arc(0, 0, bL * 0.8, 0, Math.PI * 2);
+      ctx.arc(0, 0, bL * 0.7, 0, Math.PI * 2);
       ctx.fill();
 
       // --- BODY ---
       ctx.beginPath();
-      // Top of body
       ctx.moveTo(bL * 0.5, -bH * 0.1);
       ctx.bezierCurveTo(bL * 0.35, -bH * 0.7, -bL * 0.1, -bH * 0.8, -bL * 0.45, -bH * 0.15);
       // Tail
-      ctx.save();
       const tailX = -bL * 0.45;
       ctx.bezierCurveTo(tailX - 30, -bH * 0.6, tailX - 70, -bH * 0.5, tailX - 80 + Math.sin(whale.tailAngle) * 15, -bH * 0.7);
       ctx.bezierCurveTo(tailX - 60, -bH * 0.2, tailX - 60, bH * 0.1, tailX - 80 + Math.sin(whale.tailAngle + 0.5) * 15, bH * 0.5);
       ctx.bezierCurveTo(tailX - 70, bH * 0.3, tailX - 30, bH * 0.4, tailX, bH * 0.1);
-      ctx.restore();
-      // Bottom of body (belly)
+      // Belly
       ctx.bezierCurveTo(-bL * 0.1, bH * 0.7, bL * 0.3, bH * 0.6, bL * 0.5, -bH * 0.1);
       ctx.closePath();
 
-      // Body gradient
-      const bodyGrad = ctx.createLinearGradient(0, -bH, 0, bH * 0.5);
-      bodyGrad.addColorStop(0, whale.color1);
-      bodyGrad.addColorStop(0.6, whale.color2);
-      bodyGrad.addColorStop(1, whale.bellyColor);
-      ctx.fillStyle = bodyGrad;
-      ctx.shadowColor = 'rgba(100, 180, 255, 0.5)';
-      ctx.shadowBlur = 30;
+      // Body fill - simple solid color, no gradient
+      ctx.fillStyle = whale.color2;
       ctx.fill();
-      ctx.shadowBlur = 0;
 
-      // Belly lines
-      ctx.strokeStyle = 'rgba(200, 230, 255, 0.3)';
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i < 5; i++) {
-        ctx.beginPath();
-        const startX = bL * 0.1 + i * 12;
-        ctx.moveTo(startX, bH * 0.05 + i * 6);
-        ctx.bezierCurveTo(startX - 20, bH * 0.2 + i * 5, startX - 40, bH * 0.15 + i * 4, startX - 50, bH * 0.1 + i * 3);
-        ctx.stroke();
-      }
+      // Belly lighter area
+      ctx.beginPath();
+      ctx.moveTo(bL * 0.45, bH * 0.0);
+      ctx.bezierCurveTo(bL * 0.2, bH * 0.5, -bL * 0.1, bH * 0.5, -bL * 0.3, bH * 0.05);
+      ctx.bezierCurveTo(-bL * 0.1, bH * 0.3, bL * 0.2, bH * 0.3, bL * 0.45, bH * 0.0);
+      ctx.fillStyle = whale.bellyColor;
+      ctx.globalAlpha = 0.5;
+      ctx.fill();
+      ctx.globalAlpha = 1;
 
       // Eye
       ctx.beginPath();
@@ -562,7 +555,6 @@
       ctx.arc(bL * 0.3, -bH * 0.15, 4, 0, Math.PI * 2);
       ctx.fillStyle = '#224';
       ctx.fill();
-      // Eye sparkle
       ctx.beginPath();
       ctx.arc(bL * 0.32, -bH * 0.2, 2, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
@@ -589,32 +581,7 @@
       ctx.fillStyle = whale.color2;
       ctx.fill();
 
-      // Sparkle spots on body
-      const sparklePhase = time * 0.05;
-      for (let i = 0; i < 6; i++) {
-        const sx = bL * 0.3 - i * 25 + Math.sin(sparklePhase + i) * 3;
-        const sy = -bH * 0.3 + Math.cos(sparklePhase + i * 1.5) * 8;
-        const sAlpha = 0.3 + Math.sin(sparklePhase * 2 + i * 0.8) * 0.3;
-        ctx.beginPath();
-        ctx.arc(sx, sy, 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(200, 230, 255, ${sAlpha})`;
-        ctx.fill();
-      }
-
       ctx.restore();
-
-      // Water droplets
-      whaleDroplets.forEach(d => {
-        d.x += d.vx;
-        d.y += d.vy;
-        d.vy += 0.08;
-        d.life -= 0.012;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, d.size * d.life, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(150, 210, 255, ${d.life * 0.6})`;
-        ctx.fill();
-      });
-      whaleDroplets = whaleDroplets.filter(d => d.life > 0);
     }
 
     // ============================================
@@ -692,25 +659,17 @@
         const leafScale = Math.min(1, (g - 0.3) / 0.4);
         const canopyR = (30 + g * 35) * leafScale;
 
-        // Multiple overlapping circles for natural canopy
+        // Canopy - simple solid circles (no gradients)
         const leafPositions = [
           { dx: sway, dy: -h, r: canopyR },
-          { dx: -20 + sway * 0.7, dy: -h * 0.85, r: canopyR * 0.8 },
-          { dx: 22 + sway * 0.7, dy: -h * 0.82, r: canopyR * 0.75 },
-          { dx: sway * 0.5, dy: -h * 1.08, r: canopyR * 0.65 },
-          { dx: -30 + sway * 0.5, dy: -h * 0.65, r: canopyR * 0.5 },
-          { dx: 32 + sway * 0.5, dy: -h * 0.6, r: canopyR * 0.45 },
+          { dx: -18 + sway * 0.7, dy: -h * 0.85, r: canopyR * 0.8 },
+          { dx: 20 + sway * 0.7, dy: -h * 0.82, r: canopyR * 0.75 },
+          { dx: sway * 0.5, dy: -h * 1.05, r: canopyR * 0.6 },
         ];
 
+        ctx.globalAlpha = 0.7 + leafScale * 0.3;
         leafPositions.forEach((lp, i) => {
-          const lGrad = ctx.createRadialGradient(
-            x + lp.dx, baseY + lp.dy, lp.r * 0.2,
-            x + lp.dx, baseY + lp.dy, lp.r
-          );
-          lGrad.addColorStop(0, tree.leafColor2);
-          lGrad.addColorStop(1, tree.leafColor);
-          ctx.fillStyle = lGrad;
-          ctx.globalAlpha = 0.7 + leafScale * 0.3;
+          ctx.fillStyle = i % 2 === 0 ? tree.leafColor : tree.leafColor2;
           ctx.beginPath();
           ctx.arc(x + lp.dx, baseY + lp.dy, lp.r, 0, Math.PI * 2);
           ctx.fill();
@@ -721,7 +680,7 @@
         // --- Blossoms on tree ---
         if (tree.hasBlossoms && tree.blossomProgress > 0) {
           const bp = tree.blossomProgress;
-          for (let i = 0; i < 12; i++) {
+          for (let i = 0; i < 6; i++) {
             const angle = (Math.PI * 2 / 12) * i + tree.swayOffset;
             const dist = canopyR * 0.5 + Math.sin(angle * 3 + time * 0.003) * canopyR * 0.3;
             const bx = x + sway + Math.cos(angle) * dist;
@@ -731,12 +690,9 @@
             ctx.beginPath();
             ctx.arc(bx, by, bSize, 0, Math.PI * 2);
             ctx.fillStyle = tree.bloomColor;
-            ctx.shadowColor = tree.bloomColor;
-            ctx.shadowBlur = 8 * bp;
             ctx.globalAlpha = bp * 0.8;
             ctx.fill();
           }
-          ctx.shadowBlur = 0;
           ctx.globalAlpha = 1;
 
           // Falling petals at high levels
@@ -772,20 +728,20 @@
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, W, H);
 
-      // Aurora
+      // Aurora (simplified - fewer points)
       ctx.save();
       ctx.globalAlpha = 0.08;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const auroraGrad = ctx.createLinearGradient(0, 0, W, 0);
         auroraGrad.addColorStop(0, 'transparent');
-        auroraGrad.addColorStop(0.3, `hsl(${280 + i * 40 + Math.sin(time * 0.002 + i) * 20}, 80%, 60%)`);
-        auroraGrad.addColorStop(0.7, `hsl(${320 + i * 30 + Math.cos(time * 0.0015 + i) * 25}, 70%, 50%)`);
+        auroraGrad.addColorStop(0.3, `hsl(${280 + i * 50 + Math.sin(time * 0.002 + i) * 20}, 80%, 60%)`);
+        auroraGrad.addColorStop(0.7, `hsl(${320 + i * 40 + Math.cos(time * 0.0015 + i) * 25}, 70%, 50%)`);
         auroraGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = auroraGrad;
         ctx.beginPath();
-        ctx.moveTo(0, H * 0.2 + i * 50);
-        for (let x = 0; x <= W; x += 20) {
-          const y = H * 0.2 + i * 50 + Math.sin(x * 0.003 + time * 0.002 + i) * 60 + Math.sin(x * 0.007 + time * 0.001) * 30;
+        ctx.moveTo(0, H * 0.2 + i * 60);
+        for (let x = 0; x <= W; x += 50) {
+          const y = H * 0.2 + i * 60 + Math.sin(x * 0.003 + time * 0.002 + i) * 60 + Math.sin(x * 0.007 + time * 0.001) * 30;
           ctx.lineTo(x, y);
         }
         ctx.lineTo(W, H * 0.5);
@@ -845,8 +801,6 @@
         ctx.textAlign = 'center';
         const sway = Math.sin(time * 0.003 + f.swayOffset) * 3;
         ctx.translate(f.x + sway, f.y);
-        ctx.shadowColor = f.glowColor;
-        ctx.shadowBlur = f.glowStrength || 15;
         ctx.fillText(f.emoji, 0, 0);
         ctx.restore();
       });
@@ -917,8 +871,6 @@
         item.wobble += item.wobbleSpeed;
         const wobbleX = Math.sin(item.wobble) * 15;
         ctx.globalAlpha = item.opacity;
-        ctx.shadowColor = item.type.glow;
-        ctx.shadowBlur = 20;
         ctx.font = `${item.type.size * item.scale}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -935,13 +887,9 @@
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
           ctx.fillStyle = p.color;
-          ctx.shadowColor = p.color;
-          ctx.shadowBlur = 10;
           ctx.fill();
         } else if (p.type === 'sparkle') {
           ctx.fillStyle = p.color;
-          ctx.shadowColor = '#fff';
-          ctx.shadowBlur = 8;
           const s = p.size * p.life;
           ctx.beginPath();
           ctx.moveTo(p.x, p.y - s * 2);
@@ -959,8 +907,6 @@
           ctx.font = `bold ${p.size}px Quicksand, sans-serif`;
           ctx.textAlign = 'center';
           ctx.fillStyle = p.color;
-          ctx.shadowColor = p.color;
-          ctx.shadowBlur = 15;
           ctx.fillText(p.text, p.x, p.y);
         }
         ctx.restore();
@@ -971,16 +917,19 @@
     function update() {
       time++;
 
-      // Spawn items
+      // Smoothly transition game speed
+      gameSpeed += (targetGameSpeed - gameSpeed) * 0.03;
+
+      // Spawn items (still spawn at normal rate even when slow)
       const spawnRate = Math.max(30, 60 - gardenLevel * 3);
       if (time % spawnRate === 0) spawnItem();
       if (gardenLevel >= 3 && time % (spawnRate * 2) === 0) spawnItem();
 
-      // Update items
+      // Update items - affected by gameSpeed
       items.forEach(item => {
         if (item.caught) return;
-        item.y += item.vy;
-        item.x += item.vx;
+        item.y += item.vy * gameSpeed;
+        item.x += item.vx * gameSpeed;
         const wobbleX = Math.sin(item.wobble) * 15;
         const dx = (item.x + wobbleX) - mouseX;
         const dy = item.y - mouseY;
@@ -998,15 +947,16 @@
       });
       items = items.filter(i => !i.caught);
 
-      // Update particles
+      // Update particles - affected by gameSpeed
       particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life -= p.decay;
-        if (p.type === 'text') p.size += 0.1;
-        if (p.type !== 'text') p.vy += 0.02;
+        p.x += p.vx * gameSpeed;
+        p.y += p.vy * gameSpeed;
+        p.life -= p.decay * gameSpeed;
+        if (p.type === 'text') p.size += 0.1 * gameSpeed;
+        if (p.type !== 'text') p.vy += 0.02 * gameSpeed;
       });
       particles = particles.filter(p => p.life > 0);
+      if (particles.length > 80) particles = particles.slice(-80);
 
       // Update trees
       updateTrees();
@@ -1132,8 +1082,8 @@
         }
       });
 
-      // WHALE every 10 levels!
-      if (gardenLevel % 10 === 0 && gardenLevel !== lastWhaleLevel) {
+      // WHALE every 3 levels!
+      if (gardenLevel % 3 === 0 && gardenLevel !== lastWhaleLevel) {
         lastWhaleLevel = gardenLevel;
         setTimeout(() => spawnWhale(), 1500);
       }
