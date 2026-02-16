@@ -186,6 +186,22 @@
       z-index: 25;
       text-align: center;
     }
+
+    #whale-text {
+      position: fixed;
+      top: 30%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 42px;
+      font-weight: 700;
+      color: #88ddff;
+      text-shadow: 0 0 40px rgba(100,200,255,0.9), 0 0 80px rgba(100,150,255,0.5);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 25;
+      text-align: center;
+      transition: opacity 0.5s;
+    }
   </style>
 </head>
 <body>
@@ -210,6 +226,7 @@
 
   <div id="combo-display"></div>
   <div id="level-up"></div>
+  <div id="whale-text"></div>
 
   <div class="garden-progress" id="garden-progress"></div>
 
@@ -234,6 +251,7 @@
     // --- State ---
     let mouseX = W / 2, mouseY = H / 2;
     let score = 0;
+    let totalCatches = 0;
     let streak = 0;
     let multiplier = 1;
     let gardenLevel = 1;
@@ -248,6 +266,12 @@
     let bgStars = [];
     let gardenFlowers = [];
     let trails = [];
+    let trees = [];
+    let whaleDroplets = [];
+
+    // --- Whale state ---
+    let whale = null;
+    let lastWhaleLevel = 0;
 
     // --- Item types ---
     const ITEM_TYPES = [
@@ -263,6 +287,15 @@
 
     const GARDEN_FLOWERS = ['🌷', '🌹', '🌻', '🌺', '💐', '🌼', '🏵️', '🌿', '🍀', '🌱'];
     const LEVEL_TITLES = ['Seed Sprout', 'Petal Garden', 'Blossom Field', 'Enchanted Meadow', 'Crystal Grove', 'Starlight Oasis', 'Rainbow Paradise', 'Celestial Eden', 'Dream Wonderland', 'Eternal Paradise'];
+
+    // Flower tiers - garden gets more beautiful at higher levels
+    const FLOWER_TIERS = [
+      { emojis: ['🌱', '🍀', '☘️', '🌿'], sizeMin: 16, sizeMax: 22, glowStrength: 8 },       // Lv 1-2: sprouts
+      { emojis: ['🌷', '🌼', '💮', '🌱', '🍀'], sizeMin: 20, sizeMax: 28, glowStrength: 12 }, // Lv 3-5: small flowers
+      { emojis: ['🌸', '🌺', '🌻', '🌷', '🌼', '💮'], sizeMin: 24, sizeMax: 34, glowStrength: 18 }, // Lv 6-9: beautiful flowers
+      { emojis: ['🌹', '🌺', '💐', '🏵️', '🌸', '🪻', '🌻'], sizeMin: 28, sizeMax: 40, glowStrength: 25 }, // Lv 10-14: lush garden
+      { emojis: ['🌹', '💐', '🏵️', '🪻', '🌺', '🌸', '💮', '🌻', '🌷'], sizeMin: 32, sizeMax: 48, glowStrength: 35 }, // Lv 15+: paradise
+    ];
 
     // --- Cursor / catcher ---
     const CATCHER_RADIUS = 55;
@@ -281,6 +314,27 @@
       }
     }
 
+    // --- Init trees at fixed positions ---
+    function initTrees() {
+      const treeCount = 5;
+      const spacing = W / (treeCount + 1);
+      for (let i = 0; i < treeCount; i++) {
+        trees.push({
+          x: spacing * (i + 1) + (Math.random() - 0.5) * 60,
+          groundY: H,
+          growth: 0,        // 0 to 1
+          maxHeight: 80 + Math.random() * 100,
+          trunkWidth: 4 + Math.random() * 4,
+          leafColor: `hsl(${100 + Math.random() * 60}, 60%, ${30 + Math.random() * 20}%)`,
+          leafColor2: `hsl(${130 + Math.random() * 50}, 70%, ${40 + Math.random() * 20}%)`,
+          bloomColor: `hsl(${300 + Math.random() * 60}, 70%, 70%)`,
+          swayOffset: Math.random() * Math.PI * 2,
+          hasBlossoms: false,
+          blossomProgress: 0,
+        });
+      }
+    }
+
     // --- Garden progress slots ---
     function updateGardenSlots() {
       const container = document.getElementById('garden-progress');
@@ -291,6 +345,15 @@
         slot.textContent = i < flowersCollected ? GARDEN_FLOWERS[Math.min(i, GARDEN_FLOWERS.length - 1)] : '';
         container.appendChild(slot);
       }
+    }
+
+    // --- Get current flower tier ---
+    function getFlowerTier() {
+      if (gardenLevel <= 2) return FLOWER_TIERS[0];
+      if (gardenLevel <= 5) return FLOWER_TIERS[1];
+      if (gardenLevel <= 9) return FLOWER_TIERS[2];
+      if (gardenLevel <= 14) return FLOWER_TIERS[3];
+      return FLOWER_TIERS[4];
     }
 
     // --- Spawn items ---
@@ -327,7 +390,6 @@
           type: 'circle',
         });
       }
-      // Sparkle particles
       for (let i = 0; i < 6; i++) {
         particles.push({
           x: x + (Math.random() - 0.5) * 40,
@@ -357,9 +419,350 @@
       });
     }
 
-    // --- Draw background ---
+    // ============================================
+    //  WHALE SYSTEM - digital whale drawn on canvas
+    // ============================================
+    function spawnWhale() {
+      const goingRight = Math.random() > 0.5;
+      whale = {
+        x: goingRight ? -300 : W + 300,
+        y: H * 0.4,
+        startY: H * 0.55,
+        dir: goingRight ? 1 : -1,
+        speed: 1.8,
+        progress: 0,      // 0 to 1 across screen
+        tailAngle: 0,
+        bodyLength: 200,
+        bodyHeight: 70,
+        color1: '#4488cc',
+        color2: '#6ab4f7',
+        bellyColor: '#aaddff',
+        glowColor: 'rgba(100, 180, 255, 0.3)',
+        sparkleTimer: 0,
+        active: true,
+      };
+
+      // Show whale text
+      const whaleTextEl = document.getElementById('whale-text');
+      whaleTextEl.innerHTML = '🐋 A Magical Whale Appears! 🐋';
+      whaleTextEl.style.opacity = '1';
+      setTimeout(() => whaleTextEl.style.opacity = '0', 3000);
+    }
+
+    function updateWhale() {
+      if (!whale || !whale.active) return;
+
+      whale.x += whale.speed * whale.dir * 1.5;
+      whale.progress += 0.002;
+      whale.tailAngle = Math.sin(time * 0.05) * 0.3;
+      whale.sparkleTimer++;
+
+      // Arc jump: whale rises and falls in a parabola
+      const arcProgress = whale.progress * 2; // 0 to ~2 across screen
+      const arc = -Math.pow((arcProgress - 0.5) * 2, 2) + 1; // parabola peaking at 0.5
+      whale.y = whale.startY - arc * H * 0.35;
+
+      // Spawn water droplets at peak
+      if (whale.sparkleTimer % 3 === 0) {
+        whaleDroplets.push({
+          x: whale.x - whale.dir * 20 + (Math.random() - 0.5) * 60,
+          y: whale.y + (Math.random() - 0.5) * 30,
+          vx: (Math.random() - 0.5) * 2,
+          vy: Math.random() * -2 - 0.5,
+          life: 1,
+          size: Math.random() * 4 + 2,
+        });
+      }
+
+      // Sparkle trail
+      if (whale.sparkleTimer % 5 === 0) {
+        particles.push({
+          x: whale.x - whale.dir * whale.bodyLength * 0.4 + (Math.random() - 0.5) * 40,
+          y: whale.y + (Math.random() - 0.5) * 40,
+          vx: (Math.random() - 0.5),
+          vy: -Math.random() * 0.5,
+          life: 1,
+          decay: 0.01,
+          size: Math.random() * 3 + 1,
+          color: '#88ddff',
+          type: 'sparkle',
+        });
+      }
+
+      // Remove when off screen
+      if ((whale.dir === 1 && whale.x > W + 400) || (whale.dir === -1 && whale.x < -400)) {
+        whale.active = false;
+        whale = null;
+      }
+    }
+
+    function drawWhale() {
+      if (!whale || !whale.active) return;
+
+      ctx.save();
+      ctx.translate(whale.x, whale.y);
+      if (whale.dir === -1) ctx.scale(-1, 1);
+
+      const bL = whale.bodyLength;
+      const bH = whale.bodyHeight;
+
+      // Glow aura
+      const glow = ctx.createRadialGradient(0, 0, bH * 0.5, 0, 0, bL * 0.8);
+      glow.addColorStop(0, 'rgba(100, 180, 255, 0.15)');
+      glow.addColorStop(1, 'rgba(100, 180, 255, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, bL * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // --- BODY ---
+      ctx.beginPath();
+      // Top of body
+      ctx.moveTo(bL * 0.5, -bH * 0.1);
+      ctx.bezierCurveTo(bL * 0.35, -bH * 0.7, -bL * 0.1, -bH * 0.8, -bL * 0.45, -bH * 0.15);
+      // Tail
+      ctx.save();
+      const tailX = -bL * 0.45;
+      ctx.bezierCurveTo(tailX - 30, -bH * 0.6, tailX - 70, -bH * 0.5, tailX - 80 + Math.sin(whale.tailAngle) * 15, -bH * 0.7);
+      ctx.bezierCurveTo(tailX - 60, -bH * 0.2, tailX - 60, bH * 0.1, tailX - 80 + Math.sin(whale.tailAngle + 0.5) * 15, bH * 0.5);
+      ctx.bezierCurveTo(tailX - 70, bH * 0.3, tailX - 30, bH * 0.4, tailX, bH * 0.1);
+      ctx.restore();
+      // Bottom of body (belly)
+      ctx.bezierCurveTo(-bL * 0.1, bH * 0.7, bL * 0.3, bH * 0.6, bL * 0.5, -bH * 0.1);
+      ctx.closePath();
+
+      // Body gradient
+      const bodyGrad = ctx.createLinearGradient(0, -bH, 0, bH * 0.5);
+      bodyGrad.addColorStop(0, whale.color1);
+      bodyGrad.addColorStop(0.6, whale.color2);
+      bodyGrad.addColorStop(1, whale.bellyColor);
+      ctx.fillStyle = bodyGrad;
+      ctx.shadowColor = 'rgba(100, 180, 255, 0.5)';
+      ctx.shadowBlur = 30;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Belly lines
+      ctx.strokeStyle = 'rgba(200, 230, 255, 0.3)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        const startX = bL * 0.1 + i * 12;
+        ctx.moveTo(startX, bH * 0.05 + i * 6);
+        ctx.bezierCurveTo(startX - 20, bH * 0.2 + i * 5, startX - 40, bH * 0.15 + i * 4, startX - 50, bH * 0.1 + i * 3);
+        ctx.stroke();
+      }
+
+      // Eye
+      ctx.beginPath();
+      ctx.arc(bL * 0.28, -bH * 0.15, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(bL * 0.3, -bH * 0.15, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#224';
+      ctx.fill();
+      // Eye sparkle
+      ctx.beginPath();
+      ctx.arc(bL * 0.32, -bH * 0.2, 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+
+      // Smile
+      ctx.beginPath();
+      ctx.arc(bL * 0.38, -bH * 0.02, 12, 0.1, Math.PI * 0.8);
+      ctx.strokeStyle = 'rgba(20, 50, 80, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Dorsal fin
+      ctx.beginPath();
+      ctx.moveTo(-bL * 0.05, -bH * 0.65);
+      ctx.bezierCurveTo(-bL * 0.02, -bH * 1.1, bL * 0.05, -bH * 1.0, bL * 0.1, -bH * 0.6);
+      ctx.fillStyle = whale.color1;
+      ctx.fill();
+
+      // Flipper
+      ctx.beginPath();
+      ctx.moveTo(bL * 0.15, bH * 0.15);
+      ctx.bezierCurveTo(bL * 0.2, bH * 0.6, bL * 0.0, bH * 0.65, -bL * 0.05, bH * 0.35);
+      ctx.fillStyle = whale.color2;
+      ctx.fill();
+
+      // Sparkle spots on body
+      const sparklePhase = time * 0.05;
+      for (let i = 0; i < 6; i++) {
+        const sx = bL * 0.3 - i * 25 + Math.sin(sparklePhase + i) * 3;
+        const sy = -bH * 0.3 + Math.cos(sparklePhase + i * 1.5) * 8;
+        const sAlpha = 0.3 + Math.sin(sparklePhase * 2 + i * 0.8) * 0.3;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(200, 230, 255, ${sAlpha})`;
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      // Water droplets
+      whaleDroplets.forEach(d => {
+        d.x += d.vx;
+        d.y += d.vy;
+        d.vy += 0.08;
+        d.life -= 0.012;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.size * d.life, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(150, 210, 255, ${d.life * 0.6})`;
+        ctx.fill();
+      });
+      whaleDroplets = whaleDroplets.filter(d => d.life > 0);
+    }
+
+    // ============================================
+    //  TREE SYSTEM - trees grow with levels
+    // ============================================
+    function updateTrees() {
+      const targetGrowth = Math.min(gardenLevel / 8, 1); // fully grown at level 8
+      trees.forEach(tree => {
+        // Smoothly grow toward target
+        tree.growth += (targetGrowth - tree.growth) * 0.005;
+        // Blossoms appear at level 6+
+        tree.hasBlossoms = gardenLevel >= 6;
+        if (tree.hasBlossoms) {
+          tree.blossomProgress = Math.min(1, tree.blossomProgress + 0.003);
+        }
+      });
+    }
+
+    function drawTree(tree) {
+      if (tree.growth < 0.02) return;
+
+      const g = tree.growth;
+      const x = tree.x;
+      const baseY = tree.groundY;
+      const h = tree.maxHeight * g;
+      const tw = tree.trunkWidth * (0.5 + g * 0.5);
+      const sway = Math.sin(time * 0.002 + tree.swayOffset) * 3 * g;
+
+      ctx.save();
+
+      // --- Trunk ---
+      const trunkGrad = ctx.createLinearGradient(x, baseY, x, baseY - h);
+      trunkGrad.addColorStop(0, '#4a3228');
+      trunkGrad.addColorStop(0.5, '#5c3d2e');
+      trunkGrad.addColorStop(1, '#6b4c3b');
+      ctx.fillStyle = trunkGrad;
+
+      ctx.beginPath();
+      ctx.moveTo(x - tw, baseY);
+      ctx.bezierCurveTo(
+        x - tw * 0.8 + sway * 0.3, baseY - h * 0.4,
+        x - tw * 0.5 + sway * 0.6, baseY - h * 0.7,
+        x + sway, baseY - h
+      );
+      ctx.bezierCurveTo(
+        x + tw * 0.5 + sway * 0.6, baseY - h * 0.7,
+        x + tw * 0.8 + sway * 0.3, baseY - h * 0.4,
+        x + tw, baseY
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      // --- Branches (appear when growth > 0.4) ---
+      if (g > 0.4) {
+        const branchAlpha = Math.min(1, (g - 0.4) / 0.3);
+        ctx.strokeStyle = `rgba(90, 60, 40, ${branchAlpha})`;
+        ctx.lineWidth = tw * 0.4;
+        ctx.lineCap = 'round';
+
+        // Left branch
+        ctx.beginPath();
+        ctx.moveTo(x + sway * 0.5, baseY - h * 0.6);
+        ctx.bezierCurveTo(x - 25 + sway * 0.3, baseY - h * 0.7, x - 40 + sway * 0.2, baseY - h * 0.75, x - 50 + sway * 0.2, baseY - h * 0.65);
+        ctx.stroke();
+
+        // Right branch
+        ctx.beginPath();
+        ctx.moveTo(x + sway * 0.5, baseY - h * 0.5);
+        ctx.bezierCurveTo(x + 20 + sway * 0.3, baseY - h * 0.6, x + 35 + sway * 0.2, baseY - h * 0.65, x + 45 + sway * 0.2, baseY - h * 0.55);
+        ctx.stroke();
+      }
+
+      // --- Leaf canopy (appears when growth > 0.3) ---
+      if (g > 0.3) {
+        const leafScale = Math.min(1, (g - 0.3) / 0.4);
+        const canopyR = (30 + g * 35) * leafScale;
+
+        // Multiple overlapping circles for natural canopy
+        const leafPositions = [
+          { dx: sway, dy: -h, r: canopyR },
+          { dx: -20 + sway * 0.7, dy: -h * 0.85, r: canopyR * 0.8 },
+          { dx: 22 + sway * 0.7, dy: -h * 0.82, r: canopyR * 0.75 },
+          { dx: sway * 0.5, dy: -h * 1.08, r: canopyR * 0.65 },
+          { dx: -30 + sway * 0.5, dy: -h * 0.65, r: canopyR * 0.5 },
+          { dx: 32 + sway * 0.5, dy: -h * 0.6, r: canopyR * 0.45 },
+        ];
+
+        leafPositions.forEach((lp, i) => {
+          const lGrad = ctx.createRadialGradient(
+            x + lp.dx, baseY + lp.dy, lp.r * 0.2,
+            x + lp.dx, baseY + lp.dy, lp.r
+          );
+          lGrad.addColorStop(0, tree.leafColor2);
+          lGrad.addColorStop(1, tree.leafColor);
+          ctx.fillStyle = lGrad;
+          ctx.globalAlpha = 0.7 + leafScale * 0.3;
+          ctx.beginPath();
+          ctx.arc(x + lp.dx, baseY + lp.dy, lp.r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        ctx.globalAlpha = 1;
+
+        // --- Blossoms on tree ---
+        if (tree.hasBlossoms && tree.blossomProgress > 0) {
+          const bp = tree.blossomProgress;
+          for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 / 12) * i + tree.swayOffset;
+            const dist = canopyR * 0.5 + Math.sin(angle * 3 + time * 0.003) * canopyR * 0.3;
+            const bx = x + sway + Math.cos(angle) * dist;
+            const by = baseY - h + Math.sin(angle) * dist * 0.6 - 5;
+            const bSize = (3 + Math.sin(time * 0.01 + i) * 1.5) * bp;
+
+            ctx.beginPath();
+            ctx.arc(bx, by, bSize, 0, Math.PI * 2);
+            ctx.fillStyle = tree.bloomColor;
+            ctx.shadowColor = tree.bloomColor;
+            ctx.shadowBlur = 8 * bp;
+            ctx.globalAlpha = bp * 0.8;
+            ctx.fill();
+          }
+          ctx.shadowBlur = 0;
+          ctx.globalAlpha = 1;
+
+          // Falling petals at high levels
+          if (gardenLevel >= 10 && time % 120 === Math.floor(tree.swayOffset * 10) % 120) {
+            particles.push({
+              x: x + sway + (Math.random() - 0.5) * canopyR * 1.5,
+              y: baseY - h + (Math.random() - 0.5) * canopyR,
+              vx: (Math.random() - 0.5) * 0.8 + 0.3,
+              vy: Math.random() * 0.5 + 0.3,
+              life: 1,
+              decay: 0.005,
+              size: Math.random() * 3 + 2,
+              color: tree.bloomColor,
+              type: 'circle',
+            });
+          }
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // ============================================
+    //  DRAW FUNCTIONS
+    // ============================================
     function drawBackground() {
-      // Gradient sky
       const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
       const hue1 = 260 + Math.sin(time * 0.001) * 20;
       const hue2 = 300 + Math.sin(time * 0.0015) * 15;
@@ -369,7 +772,7 @@
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, W, H);
 
-      // Aurora effect
+      // Aurora
       ctx.save();
       ctx.globalAlpha = 0.08;
       for (let i = 0; i < 3; i++) {
@@ -379,7 +782,6 @@
         auroraGrad.addColorStop(0.7, `hsl(${320 + i * 30 + Math.cos(time * 0.0015 + i) * 25}, 70%, 50%)`);
         auroraGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = auroraGrad;
-
         ctx.beginPath();
         ctx.moveTo(0, H * 0.2 + i * 50);
         for (let x = 0; x <= W; x += 20) {
@@ -403,39 +805,56 @@
       });
     }
 
-    // --- Draw garden at bottom ---
     function drawGarden() {
-      // Ground
-      const groundGrad = ctx.createLinearGradient(0, H - 80, 0, H);
+      // Ground - gets more lush at higher levels
+      const groundHeight = 80 + Math.min(gardenLevel * 3, 40);
+      const greenIntensity = Math.min(gardenLevel * 8, 80);
+      const groundGrad = ctx.createLinearGradient(0, H - groundHeight, 0, H);
       groundGrad.addColorStop(0, 'transparent');
-      groundGrad.addColorStop(0.3, 'rgba(30, 60, 30, 0.3)');
-      groundGrad.addColorStop(1, 'rgba(20, 40, 25, 0.6)');
+      groundGrad.addColorStop(0.2, `rgba(${20 + greenIntensity * 0.2}, ${40 + greenIntensity}, ${25 + greenIntensity * 0.3}, 0.3)`);
+      groundGrad.addColorStop(0.6, `rgba(${15 + greenIntensity * 0.15}, ${50 + greenIntensity * 0.8}, ${20 + greenIntensity * 0.2}, 0.5)`);
+      groundGrad.addColorStop(1, `rgba(${10 + greenIntensity * 0.1}, ${35 + greenIntensity * 0.6}, ${18 + greenIntensity * 0.15}, 0.7)`);
       ctx.fillStyle = groundGrad;
-      ctx.fillRect(0, H - 80, W, 80);
+      ctx.fillRect(0, H - groundHeight, W, groundHeight);
 
-      // Planted flowers
+      // Grass blades - more and taller at higher levels
+      if (gardenLevel >= 2) {
+        const grassCount = Math.min(30 + gardenLevel * 5, 80);
+        const grassHeight = Math.min(8 + gardenLevel * 2, 30);
+        ctx.strokeStyle = `rgba(${50 + greenIntensity * 0.3}, ${100 + greenIntensity}, ${40 + greenIntensity * 0.2}, 0.4)`;
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < grassCount; i++) {
+          const gx = (W / grassCount) * i + Math.sin(i * 7.3) * 20;
+          const gh = grassHeight * (0.5 + Math.sin(i * 3.1) * 0.5);
+          const gsway = Math.sin(time * 0.003 + i * 0.5) * 4;
+          ctx.beginPath();
+          ctx.moveTo(gx, H - groundHeight * 0.6);
+          ctx.quadraticCurveTo(gx + gsway, H - groundHeight * 0.6 - gh * 0.6, gx + gsway * 1.5, H - groundHeight * 0.6 - gh);
+          ctx.stroke();
+        }
+      }
+
+      // Draw trees (behind flowers)
+      trees.forEach(tree => drawTree(tree));
+
+      // Planted flowers with tier-based beauty
       gardenFlowers.forEach(f => {
         ctx.save();
         ctx.globalAlpha = f.opacity;
         ctx.font = `${f.size}px serif`;
         ctx.textAlign = 'center';
-        // Gentle sway
         const sway = Math.sin(time * 0.003 + f.swayOffset) * 3;
         ctx.translate(f.x + sway, f.y);
-        ctx.fillText(f.emoji, 0, 0);
-        // Small glow
         ctx.shadowColor = f.glowColor;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = f.glowStrength || 15;
         ctx.fillText(f.emoji, 0, 0);
         ctx.restore();
       });
     }
 
-    // --- Draw catcher ---
     function drawCatcher() {
       ctx.save();
 
-      // Outer glow ring
       const gradient = ctx.createRadialGradient(mouseX, mouseY, CATCHER_RADIUS * 0.5, mouseX, mouseY, CATCHER_RADIUS);
       gradient.addColorStop(0, 'rgba(255, 200, 255, 0.0)');
       gradient.addColorStop(0.7, 'rgba(255, 150, 220, 0.08)');
@@ -445,7 +864,6 @@
       ctx.arc(mouseX, mouseY, CATCHER_RADIUS, 0, Math.PI * 2);
       ctx.fill();
 
-      // Spinning ring
       ctx.strokeStyle = 'rgba(255, 200, 255, 0.3)';
       ctx.lineWidth = 2;
       ctx.setLineDash([8, 8]);
@@ -455,7 +873,6 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Inner circle with sparkle
       const innerGrad = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 18);
       innerGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
       innerGrad.addColorStop(0.5, 'rgba(255, 200, 255, 0.4)');
@@ -465,7 +882,6 @@
       ctx.arc(mouseX, mouseY, 18, 0, Math.PI * 2);
       ctx.fill();
 
-      // Orbiting dots
       for (let i = 0; i < 4; i++) {
         const angle = (Math.PI * 2 / 4) * i + time * 0.03;
         const ox = mouseX + Math.cos(angle) * (CATCHER_RADIUS - 15);
@@ -478,13 +894,12 @@
 
       ctx.restore();
 
-      // Trail
       trails.push({ x: mouseX, y: mouseY, life: 1 });
       if (trails.length > 20) trails.shift();
     }
 
     function drawTrails() {
-      trails.forEach((t, i) => {
+      trails.forEach(t => {
         t.life -= 0.05;
         if (t.life <= 0) return;
         ctx.beginPath();
@@ -495,35 +910,27 @@
       trails = trails.filter(t => t.life > 0);
     }
 
-    // --- Draw items ---
     function drawItems() {
       items.forEach(item => {
         if (item.caught) return;
         ctx.save();
         item.wobble += item.wobbleSpeed;
         const wobbleX = Math.sin(item.wobble) * 15;
-
         ctx.globalAlpha = item.opacity;
-
-        // Glow
         ctx.shadowColor = item.type.glow;
         ctx.shadowBlur = 20;
-
         ctx.font = `${item.type.size * item.scale}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(item.type.emoji, item.x + wobbleX, item.y);
-
         ctx.restore();
       });
     }
 
-    // --- Draw particles ---
     function drawParticles() {
       particles.forEach(p => {
         ctx.save();
         ctx.globalAlpha = p.life;
-
         if (p.type === 'circle') {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
@@ -536,7 +943,6 @@
           ctx.shadowColor = '#fff';
           ctx.shadowBlur = 8;
           const s = p.size * p.life;
-          // 4-point star
           ctx.beginPath();
           ctx.moveTo(p.x, p.y - s * 2);
           ctx.lineTo(p.x + s * 0.5, p.y);
@@ -557,7 +963,6 @@
           ctx.shadowBlur = 15;
           ctx.fillText(p.text, p.x, p.y);
         }
-
         ctx.restore();
       });
     }
@@ -569,7 +974,6 @@
       // Spawn items
       const spawnRate = Math.max(30, 60 - gardenLevel * 3);
       if (time % spawnRate === 0) spawnItem();
-      // Extra items at higher levels
       if (gardenLevel >= 3 && time % (spawnRate * 2) === 0) spawnItem();
 
       // Update items
@@ -577,27 +981,21 @@
         if (item.caught) return;
         item.y += item.vy;
         item.x += item.vx;
-
-        // Check if caught
         const wobbleX = Math.sin(item.wobble) * 15;
         const dx = (item.x + wobbleX) - mouseX;
         const dy = item.y - mouseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-
         if (dist < CATCHER_RADIUS + item.type.size * 0.3) {
           item.caught = true;
           catchItem(item);
         }
-
-        // Off screen - just remove, no penalty!
         if (item.y > H + 50) {
-          item.caught = true; // mark for removal
+          item.caught = true;
           streak = 0;
           multiplier = 1;
           document.getElementById('streak-text').textContent = 'x1';
         }
       });
-
       items = items.filter(i => !i.caught);
 
       // Update particles
@@ -606,14 +1004,21 @@
         p.y += p.vy;
         p.life -= p.decay;
         if (p.type === 'text') p.size += 0.1;
-        if (p.type !== 'text') p.vy += 0.02; // slight gravity
+        if (p.type !== 'text') p.vy += 0.02;
       });
       particles = particles.filter(p => p.life > 0);
+
+      // Update trees
+      updateTrees();
+
+      // Update whale
+      updateWhale();
     }
 
     // --- Catch an item ---
     function catchItem(item) {
       streak++;
+      totalCatches++;
       if (streak >= 3) multiplier = 2;
       if (streak >= 7) multiplier = 3;
       if (streak >= 12) multiplier = 5;
@@ -621,17 +1026,13 @@
       const points = item.type.points * multiplier;
       score += points;
 
-      // Visual feedback
       burstParticles(item.x, item.y, item.type.color);
       spawnScoreText(item.x, item.y - 20, `+${points}`, item.type.color);
 
-      // Update UI
       document.getElementById('score-text').textContent = score;
-
       const streakEl = document.getElementById('streak-text');
       streakEl.textContent = `x${multiplier}`;
 
-      // Pop animation
       const scoreBox = document.getElementById('score-box');
       scoreBox.classList.add('pop');
       setTimeout(() => scoreBox.classList.remove('pop'), 200);
@@ -658,31 +1059,34 @@
       }
       updateGardenSlots();
 
-      // Plant a flower in the garden
       plantFlower(item);
     }
 
     function plantFlower(item) {
-      const flowerEmojis = ['🌸', '🌷', '🌹', '🌻', '🌺', '💮', '🌼', '🏵️', '🪻', '🌿', '🍀', '☘️', '🌱', '💐'];
+      const tier = getFlowerTier();
+      const emoji = tier.emojis[Math.floor(Math.random() * tier.emojis.length)];
+      const size = tier.sizeMin + Math.random() * (tier.sizeMax - tier.sizeMin);
+
       gardenFlowers.push({
         x: Math.random() * (W - 100) + 50,
-        y: H - 20 - Math.random() * 40,
-        emoji: flowerEmojis[Math.floor(Math.random() * flowerEmojis.length)],
-        size: 20 + Math.random() * 16,
+        y: H - 15 - Math.random() * 50,
+        emoji,
+        size,
         opacity: 0,
         swayOffset: Math.random() * Math.PI * 2,
         glowColor: item.type.glow,
+        glowStrength: tier.glowStrength,
       });
 
-      // Fade in
       const f = gardenFlowers[gardenFlowers.length - 1];
       const fadeIn = setInterval(() => {
         f.opacity = Math.min(1, f.opacity + 0.05);
         if (f.opacity >= 1) clearInterval(fadeIn);
       }, 30);
 
-      // Keep garden manageable
-      if (gardenFlowers.length > 50) gardenFlowers.shift();
+      // More flowers allowed at higher levels
+      const maxFlowers = 40 + gardenLevel * 5;
+      if (gardenFlowers.length > maxFlowers) gardenFlowers.shift();
     }
 
     function levelUp() {
@@ -712,10 +1116,27 @@
 
       updateGardenSlots();
 
-      // Pop the garden box
       const gardenBox = document.getElementById('garden-box');
       gardenBox.classList.add('pop');
       setTimeout(() => gardenBox.classList.remove('pop'), 400);
+
+      // Upgrade existing flowers when entering a new tier
+      const tier = getFlowerTier();
+      gardenFlowers.forEach(f => {
+        // Grow existing flowers a bit
+        f.size = Math.min(f.size + 2, tier.sizeMax);
+        f.glowStrength = tier.glowStrength;
+        // Some flowers evolve to new tier emojis
+        if (Math.random() < 0.3) {
+          f.emoji = tier.emojis[Math.floor(Math.random() * tier.emojis.length)];
+        }
+      });
+
+      // WHALE every 10 levels!
+      if (gardenLevel % 10 === 0 && gardenLevel !== lastWhaleLevel) {
+        lastWhaleLevel = gardenLevel;
+        setTimeout(() => spawnWhale(), 1500);
+      }
     }
 
     // --- Main loop ---
@@ -727,6 +1148,7 @@
       }
 
       drawBackground();
+      drawWhale();
       drawGarden();
       drawTrails();
       drawItems();
@@ -764,6 +1186,7 @@
     });
 
     initBgStars();
+    initTrees();
     gameLoop();
   </script>
 </body>
